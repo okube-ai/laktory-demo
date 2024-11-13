@@ -1,0 +1,10 @@
+catalog-demo:
+  name: demo_${vars.env}
+  isolation_mode: OPEN
+  grants:
+    - principal: account users
+      privileges:
+        - SELECT
+  schemas:
+    - name: default
+    - name: finance

@@ -1,0 +1,36 @@
+name: laktory-demo
+organization: okube
+description: Laktory Demo
+backend: terraform
+resources:
+
+  # Catalogs
+  databricks_catalogs: ${include.resources/catalogs.yaml}
+
+  # Secret scopes and secret values
+  databricks_secretscopes: ${include.resources/secretscopes.yaml}
+
+  # Warehouses
+  databricks_warehouses: ${include.resources/warehouses.yaml}
+
+  # Warehouses
+  databricks_notebooks: ${include.resources/notebooks.yaml}
+
+  # Laktory Pipelines
+  pipelines:
+    pl-demo-stock-prices: ${include.resources/pl-demo-stock-prices.yaml}
+
+  providers:
+    databricks:
+      host: ${vars.databricks_host}
+      token: ${vars.DATABRICKS_TOKEN}
+
+environments:
+  dev:
+    variables:
+      env: dev
+      databricks_host: https://adb-4623853922539974.14.azuredatabricks.net/
+  prd:
+    variables:
+      env: prd
+      databricks_host: https://adb-1985337240298151.11.azuredatabricks.net/

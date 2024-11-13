@@ -1,0 +1,13 @@
+notebook-job-laktory-pl:
+  source: ./notebooks/job_laktory_pl.py
+  dirpath: demo/
+  access_controls:
+    - group_name: account users
+      permission_level: CAN_READ
+
+notebook-dlt-laktory-pl:
+  source: ./notebooks/dlt_laktory_pl.py
+  dirpath: demo/
+  access_controls:
+    - group_name: account users
+      permission_level: CAN_READ

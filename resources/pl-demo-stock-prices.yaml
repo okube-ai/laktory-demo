@@ -1,0 +1,185 @@
+name: pl-demo-stock-prices
+
+# Orchestration
+orchestrator: DATABRICKS_JOB
+databricks_job:
+  name: job-pl-demo-stock-prices
+  notebook_path: /.laktory/demo/job_laktory_pl.py
+
+#orchestrator: DLT
+#dlt:
+#  development: True
+#  target: demo_${vars.env}
+#  clusters:
+#  - name: default
+#    node_type_id: Standard_DS3_v2
+#    autoscale:
+#      min_workers: 1
+#      max_workers: 2
+#  configuration:
+#    pipeline_name: pl-demo-stock-prices
+#  libraries:
+#  - notebook:
+#      path: /.laktory/demo/dlt_laktory_pl.py
+
+# --------------------------------------------------------------------------- #
+# Nodes                                                                       #
+# --------------------------------------------------------------------------- #
+
+nodes:
+
+  # ------------------------------------------------------------------------- #
+  # Stock Prices                                                              #
+  # ------------------------------------------------------------------------- #
+
+  - name: brz_stock_prices
+    timestamp_key: data.created_at
+    source:
+      path: /Volumes/${vars.env}/sources/landing/events/yahoo-finance/stock_price/
+      as_stream: true
+    sinks:
+    - table_name: brz_stock_prices
+      schema_name: finance
+      catalog_name: demo_${vars.env}
+      mode: APPEND
+
+  - name: slv_stock_prices
+    timestamp_key: created_at
+    expectations:
+      - name: positive_price
+        expr: open > 0
+        action: QUARANTINE
+      - name: recent_price
+        expr: created_at > '2023-01-01'
+        action: DROP
+    source:
+      node_name: brz_stock_prices
+      as_stream: true
+    sinks:
+    - table_name: slv_stock_prices
+      schema_name: finance
+      catalog_name: demo_${vars.env}
+      mode: APPEND
+    - table_name: slv_stock_prices_quarantine
+      schema_name: finance
+      catalog_name: demo_${vars.env}
+      mode: APPEND
+      is_quarantine: True
+    transformer:
+      nodes:
+        - sql_expr: |
+            SELECT
+              data.created_at AS created_at,
+              data.symbol AS symbol,
+              data.open AS open,
+              data.close AS close,
+              data.high AS high,
+              data.low AS low,
+              data.volume AS volume
+            FROM
+              {df}
+        - func_name: drop_duplicates
+          func_kwargs:
+            subset:
+              - symbol
+              - created_at
+
+  # ------------------------------------------------------------------------- #
+  # Stock Metadata                                                            #
+  # ------------------------------------------------------------------------- #
+
+  - name: brz_stock_metadata
+    source:
+      path: /Volumes/${vars.env}/sources/landing/events/yahoo-finance/stock_metadata/
+    sinks:
+    - table_name: brz_stock_metadata
+      schema_name: finance
+      catalog_name: demo_${vars.env}
+      mode: OVERWRITE
+
+  - name: slv_stock_metadata
+    source:
+      node_name: brz_stock_metadata
+    sinks:
+    - table_name: slv_stock_metadata
+      schema_name: finance
+      catalog_name: demo_${vars.env}
+      mode: OVERWRITE
+    drop_source_columns: True
+    transformer:
+      nodes:
+        - with_column:
+            name: symbol
+            type: string
+            expr: F.col('data.symbol')
+
+        - with_column:
+            name: currency
+            type: string
+            expr: F.col('data.currency')
+
+        - with_column:
+            name: first_traded
+            type: timestamp
+            expr: F.col('data.firstTradeDate')
+
+  # ------------------------------------------------------------------------- #
+  # Silver Joins                                                              #
+  # ------------------------------------------------------------------------- #
+
+  - name: slv_stocks
+    drop_source_columns: False
+    source:
+      node_name: slv_stock_prices
+      as_stream: false
+    sinks:
+    - table_name: slv_stocks
+      schema_name: finance
+      catalog_name: demo_${vars.env}
+      mode: OVERWRITE
+    transformer:
+      nodes:
+        - func_name: laktory.smart_join
+          func_kwargs:
+            other:
+              node_name: slv_stock_metadata
+              selects:
+                - symbol
+                - currency
+                - first_traded
+            "on":
+              - symbol
+
+  # ------------------------------------------------------------------------- #
+  # Gold                                                                      #
+  # ------------------------------------------------------------------------- #
+
+  - name: gld_stock_prices_by_1d
+    source:
+      node_name: slv_stocks
+      as_stream: false
+    sinks:
+    - table_name: gld_stock_prices_by_1d
+      schema_name: finance
+      catalog_name: demo_${vars.env}
+      mode: OVERWRITE
+    transformer:
+      nodes:
+        - func_name: laktory.groupby_and_agg
+          func_kwargs:
+            groupby_columns:
+              - symbol
+            groupby_window:
+              time_column: created_at
+              window_duration: 1 day
+            agg_expressions:
+              - name: count
+                expr: F.count('symbol')
+              - name: low
+                expr: F.min('low')
+              - name: high
+                expr: F.max('high')
+              - name: open
+                expr: F.first('open')
+              - name: close
+                expr: F.last('close')
